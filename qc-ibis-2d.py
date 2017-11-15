@@ -1,35 +1,41 @@
 from keras.models import Sequential
-from keras.layers import Dense, Dropout, Activation, Conv2D, MaxPooling2D, Flatten, BatchNormalization, Dropout
-from keras.optimizers import SGD
-from keras.callbacks import EarlyStopping, ReduceLROnPlateau, ModelCheckpoint
+from keras.layers import Dense, Conv2D, MaxPooling2D, Flatten, BatchNormalization, Dropout
+from keras.optimizers import SGD, Adam
+from keras.callbacks import ModelCheckpoint
 
 import numpy as np
 import h5py
 
-import os, csv
+import os, csv, time
 import nibabel as nib
 
 from dltk.core.io.preprocessing import normalise_zero_one, resize_image_with_crop_or_pad
 from custom_loss import sensitivity, specificity
 
+from collections import defaultdict
 
 import pickle as pkl
 
 import matplotlib as mpl
 mpl.use('Agg')
 import matplotlib.pyplot as plt
+import matplotlib.cm as cm
 
-from sklearn.model_selection import StratifiedShuffleSplit
+from sklearn.model_selection import StratifiedShuffleSplit, StratifiedKFold
 from sklearn.metrics import confusion_matrix
 
-import argparse
+from vis.visualization import visualize_cam, overlay
+from vis.utils import utils
+from keras import activations
 
-workdir = '/home/users/adoyle/deepqc/IBIS'
-datadir = '/data1/data/IBIS/'
+# from vis.utils import find_layer_idx
 
-label_file = datadir + 'ibis_t1_qc.csv'
+workdir = '/home/users/adoyle/deepqc/IBIS/'
+datadir = '/data1/users/adoyle/IBIS/'
 
-total_subjects = 468
+label_file = datadir + 't1_ibis_QC_labels.csv'
+
+total_subjects = 2020
 target_size = (168, 256, 244)
 
 def make_ibis_qc():
@@ -46,13 +52,14 @@ def make_ibis_qc():
 
     with open(label_file, 'r') as labels_csv:
         qc_reader = csv.reader(labels_csv)
+        next(qc_reader)
 
         for line in qc_reader:
             try:
-                t1_filename = line[0][0:-4] + '.mnc'
-                label = int(line[1])  # 0, 1, or 2
+                t1_filename = line[3][9:]
+                label = line[4]
 
-                if label >= 1:
+                if 'Pass' in label:
                     one_hot = [0.0, 1.0]
                 else:
                     one_hot = [1.0, 0.0]
@@ -65,7 +72,7 @@ def make_ibis_qc():
                     t1_data = resize_image_with_crop_or_pad(t1_data, img_size=target_size, mode='constant')
 
                 f['ibis_t1'][index, ...] = normalise_zero_one(t1_data)
-                f['filename'][index] = t1_filename
+                f['filename'][index] = t1_filename.split('/')[-1]
 
                 # plt.imshow(t1_data[96, ...])
                 # plt.axis('off')
@@ -78,6 +85,7 @@ def make_ibis_qc():
             except Exception as e:
                 print('Error:', e)
 
+    print('Total subjects we actually have:', index+1)
     f.close()
 
     return indices, labels
@@ -86,27 +94,26 @@ def make_ibis_qc():
 def qc_model():
     nb_classes = 2
 
-    conv_size = (3, 3)
-    pool_size = (2, 2)
+    conv_size = (5, 5)
 
     model = Sequential()
 
     model.add(Conv2D(16, conv_size, activation='relu', input_shape=(target_size[1], target_size[2], 1)))
     model.add(BatchNormalization())
     # model.add(MaxPooling2D(pool_size=pool_size))
+    model.add(Dropout(0.1))
+
+    model.add(Conv2D(32, conv_size, activation='relu'))
+    # model.add(MaxPooling2D(pool_size=(2, 2)))
+    model.add(Dropout(0.1))
+
+    model.add(Conv2D(32, conv_size, activation='relu'))
+    model.add(MaxPooling2D(pool_size=(2, 2)))
     model.add(Dropout(0.2))
-
-    model.add(Conv2D(32, conv_size, activation='relu'))
-    model.add(MaxPooling2D(pool_size=(2, 2)))
-    model.add(Dropout(0.3))
-
-    model.add(Conv2D(32, conv_size, activation='relu'))
-    model.add(MaxPooling2D(pool_size=(2, 2)))
-    model.add(Dropout(0.3))
 
     model.add(Conv2D(64, conv_size, activation='relu'))
     model.add(MaxPooling2D(pool_size=(2,2)))
-    model.add(Dropout(0.3))
+    model.add(Dropout(0.2))
 
     model.add(Conv2D(64, conv_size, activation='relu'))
     model.add(MaxPooling2D(pool_size=(2,2)))
@@ -126,13 +133,7 @@ def qc_model():
     model.add(Dense(256, activation='relu'))
     model.add(Dropout(0.5))
     
-    model.add(Dense(nb_classes, activation='softmax'))
-
-    sgd = SGD(lr=1e-3, momentum=0.9, decay=1e-6, nesterov=True)
-
-    model.compile(loss='categorical_crossentropy',
-                  optimizer=sgd,
-                  metrics=["accuracy", sensitivity, specificity])
+    model.add(Dense(nb_classes, activation='softmax', name='predictions'))
 
     return model
 
@@ -226,7 +227,115 @@ def test_images(model, test_indices, save_imgs=True):
 
     return sensitivity, specificity
 
+def plot_graphs(hist, results_dir, fold_num):
+    epoch_num = range(len(hist.history['acc']))
+
+    plt.clf()
+    # plt.plot(epoch_num, hist.history['acc'], label='Training Accuracy')
+    # plt.plot(epoch_num, hist.history['val_acc'], label="Validation Accuracy")
+    plt.plot(epoch_num, hist.history['sensitivity'], label='Trai Sens')
+    plt.plot(epoch_num, hist.history['val_sensitivity'], label='Val Sens')
+    plt.plot(epoch_num, hist.history['specificity'], label='Train Spec')
+    plt.plot(epoch_num, hist.history['val_specificity'], label='Val Spec')
+
+    plt.legend(shadow=True)
+    plt.xlabel("Training Epoch Number")
+    plt.ylabel("Metric Value")
+    plt.savefig(results_dir + 'training_metrics_fold' + str(fold_num) + '.png', bbox_inches='tight')
+    plt.close()
+
+def predict_and_visualize(model, indices, results_dir):
+    f = h5py.File(workdir + 'ibis.hdf5', 'r')
+    images = f['ibis_t1']
+    labels = f['qc_label']
+    filenames = f['filename']
+
+    predictions = []
+
+    with open(results_dir + 'test_images.csv', 'w') as output_file:
+        output_writer = csv.writer(output_file)
+        output_writer.writerow(['Filename', 'Pass Probability', 'Actual'])
+
+        for index in indices:
+            img = images[index, target_size[0]//2, ...][np.newaxis, ..., np.newaxis]
+            label = labels[index, ...]
+
+            prediction = model.predict(img, batch_size=1)
+            print('index:', index, 'probs:', prediction[0])
+
+            output_writer.writerow([filenames[index, ...][2:-1], prediction[0][1], np.argmax(label)])
+
+            predictions.append(np.argmax(prediction[0]))
+
+        model.compile(loss='categorical_crossentropy',
+                      optimizer='sgd',
+                      metrics = ["accuracy"])
+        layer_idx = utils.find_layer_idx(model, 'predictions')
+        model.layers[layer_idx].activation = activations.linear
+        model = utils.apply_modifications(model)
+
+    for i, (index, prediction) in enumerate(zip(indices, predictions)):
+        f, ax = plt.subplots(1, 4)
+
+        actual = np.argmax(labels[index, ...])
+        print('actual, predicted PASS/FAIL:', actual, prediction)
+        if prediction == actual:
+            decision = '_right_'
+        else:
+            decision = '_wrong_'
+
+        if actual == 1:
+            qc_status = 'PASS'
+        else:
+            qc_status = 'FAIL'
+
+        filename = qc_status + decision + str(filenames[index, ...])[2:-1][:-4] + '.png'
+        # filename = str(i) + decision + qc_status + '.png'
+
+        plt.suptitle(filename)
+
+        img = images[index, target_size[0] // 2, ...][np.newaxis, ..., np.newaxis]
+
+        ax[0].imshow(img[0, ...])
+        ax[0].axis('off')
+        ax[0].xlabel('input')
+
+        for j, type in enumerate([None, 'guided', 'relu']):
+            grads = visualize_cam(model, layer_idx, filter_indices=prediction, seed_input=img[0, ...], backprop_modifier=type)
+
+            heatmap = np.uint8(cm.jet(grads)[:,:,0,:3]*255)
+            gray = np.uint8(img[0, :, :, :]*255)
+            gray3 = np.dstack((gray,)*3)
+
+            ax[j+1] = plt.imshow(overlay(heatmap, gray3, alpha=0.3))
+
+        plt.savefig(results_dir + filename, bbox_inches='tight')
+        plt.close()
+
+    f.close()
+
+def verify_hdf5(indices, results_dir):
+    f = h5py.File(workdir + 'ibis.hdf5', 'r')
+    images = f['ibis_t1']
+    labels = f['qc_label']
+    filenames = f['filename']
+
+    for index in indices:
+        img = images[index, target_size[0]//2, :, :]
+        label = labels[index, ...]
+        filename = filenames[index, ...]
+
+        plt.imshow(img, cmap='gray')
+        plt.xlabel(str(label))
+        plt.ylabel(str(filename[2:-1]))
+        plt.savefig(results_dir + 'img-' + str(index), bbox_inches='tight')
+        plt.close()
+
+
 if __name__ == "__main__":
+    start_time = time.time()
+
+    batch_size = 32
 
     try:
         experiment_number = pkl.load(open(workdir + 'experiment_number.pkl', 'rb'))
@@ -242,64 +351,80 @@ if __name__ == "__main__":
 
     pkl.dump(experiment_number, open(workdir + 'experiment_number.pkl', 'wb'))
 
-    indices, labels = make_ibis_qc()
+    remake = False
+    if remake:
+        indices, labels = make_ibis_qc()
+        pkl.dump(indices, open(workdir + 'valid_indices.pkl', 'wb'))
+        pkl.dump(labels, open(workdir + 'qc_labels.pkl', 'wb'))
+    else:
+        indices = pkl.load(open(workdir + 'valid_indices.pkl', 'rb'))
+        labels = pkl.load(open(workdir + 'qc_labels.pkl', 'rb'))
 
-    sss = StratifiedShuffleSplit(n_splits=1, test_size=0.3)
-    result_indices = sss.split(np.asarray(indices), np.asarray(labels))
-    train_indices, test_indices = next(result_indices)
+    labels = np.asarray(labels, dtype='uint8')
+    indices = np.asarray(indices, dtype='uint8')
 
-    sss2 = StratifiedShuffleSplit(n_splits=1, test_size=0.5)
-    result_indices = sss2.split(np.asarray(test_indices), np.asarray(labels)[test_indices])
+    print('indices', np.asarray(indices))
+    print('labels', np.asarray(labels))
 
-    test_indices, validation_indices = next(result_indices)
+    skf = StratifiedKFold(n_splits=4)
+
+    sgd = SGD(lr=1e-3, momentum=0.9, decay=1e-6, nesterov=True)
+    adam = Adam(lr=0.0001, beta_1=0.9, beta_2=0.999, epsilon=1e-08, decay=1e-6)
 
     model = qc_model()
     model.summary()
+    model.compile(loss='categorical_crossentropy',
+                  optimizer=adam,
+                  metrics=["accuracy", sensitivity, specificity])
 
-    model_checkpoint = ModelCheckpoint(results_dir + "best_model.hdf5", monitor="val_acc", verbose=0, save_best_only=True, save_weights_only=False, mode='auto')
+    scores = {}
+    for metric in model.metrics_names:
+        scores[metric] = []
 
-    hist = model.fit_generator(batch(train_indices, 32, True), len(train_indices), epochs=400, validation_data=batch(validation_indices, 32), validation_steps=len(validation_indices), callbacks=[model_checkpoint], class_weight = {0:.7, 1:.3})
+    for k, (train_indices, test_indices) in enumerate(skf.split(np.asarray(indices), labels)):
+        model = qc_model()
 
-    model.load_weights(results_dir + 'best_model.hdf5')
+        model.compile(loss='categorical_crossentropy',
+                      optimizer=adam,
+                      metrics=["accuracy", sensitivity, specificity])
 
-    # test_scores = []
-    # sensitivities = []
-    # specificities = []
-    #
-    # for test_run in range(-5, 5):
-    #     score = model.evaluate_generator(batch(test_indices, 2, True), len(test_indices))
-    #     test_scores.append(score[1])
-    #
-    #
-    #     if test_run == 0:
-    #         sens, spec = test_images(model, test_indices, labels, filenames, test_run, save_imgs=True)
-    #     else:
-    #         sens, spec = test_images(model, test_indices, labels, filenames, test_run, save_imgs=False)
-    #     print("sensitivity:", sens)
-    #     print("specificity:", spec)
-    #
-    #     sensitivities.append(sens)
-    #     specificities.append(spec)
-    #
-    # print('scores:', test_scores)
-    # print('average score', np.mean(test_scores))
-    # print('average sensitivity', np.mean(sensitivities))
-    # print('average specificity', np.mean(specificities))
-    #
-    #
-    # print(model.metrics_names)
-    #
-    # print(hist.history.keys())
-    #
-    # epoch_num = range(len(hist.history['acc']))
-    # train_error = np.subtract(1,np.array(hist.history['acc']))
-    # test_error  = np.subtract(1,np.array(hist.history['val_acc']))
-    #
-    # plt.clf()
-    # plt.plot(epoch_num, train_error, label='Training Error')
-    # plt.plot(epoch_num, test_error, label="Validation Error")
-    # plt.legend(shadow=True)
-    # plt.xlabel("Training Epoch Number")
-    # plt.ylabel("Error")
-    # plt.savefig('results.png')
-    # plt.close()
+        validation_indices = test_indices[::2]
+        test_indices = test_indices[1::2]
+
+        print(labels[test_indices])
+        print(np.sum(labels[test_indices]))
+        print(len(labels[test_indices]))
+
+        print('train indices:', len(train_indices), np.sum(labels[np.asarray(train_indices, dtype='uint8')]))
+        print('validation indices:', len(validation_indices), np.sum(labels[np.asarray(validation_indices, dtype='uint8')]))
+        print('test indices:', len(test_indices), np.sum(labels[np.asarray(test_indices, dtype='uint8')]))
+
+        # verify_hdf5(reversed(train_indices), results_dir)
+
+        model_checkpoint = ModelCheckpoint(results_dir + "best_weights" + "_fold_" + str(k) + ".hdf5", monitor="val_acc", verbose=0, save_best_only=True, save_weights_only=False, mode='max')
+
+        hist = model.fit_generator(batch(train_indices, batch_size, True), np.ceil(len(train_indices)/batch_size), epochs=400, validation_data=batch(validation_indices, batch_size), validation_steps=np.ceil(len(validation_indices)//batch_size), callbacks=[model_checkpoint], class_weight = {0:10, 1:1})
+
+        model.load_weights(results_dir + "best_weights" + "_fold_" + str(k) + ".hdf5")
+        model.save(results_dir + 'ibis_qc_model' + str(k) + '.hdf5')
+
+        metrics = model.evaluate_generator(batch(test_indices, batch_size, True), np.ceil(len(test_indices)/batch_size))
+
+        print(model.metrics_names)
+        print(metrics)
+
+        plot_graphs(hist, results_dir, k)
+
+        for metric_name, score in zip(model.metrics_names, metrics):
+            scores[metric_name].append(score)
+
+        predict_and_visualize(model, test_indices, results_dir)
+
+    print(metric, scores[metric])
+    for metric in model.metrics_names:
+        print(metric, np.mean(scores[metric]))
+
+    print(scores)
+
+    print('time taken:', (time.time() - start_time) / 60, 'minutes')
+    print('This experiment is brought to you by the number:', experiment_number)

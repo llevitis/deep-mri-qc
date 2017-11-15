@@ -38,6 +38,7 @@ import tensorflow as tf
 
 
 workdir = '/home/users/adoyle/deepqc/'
+data_file = 'deepqc-all-sets.hdf5'
 
 
 image_size = (192, 256, 192)
@@ -204,12 +205,6 @@ def top_model():
 
     model = Model(inputs=inputs, outputs=[output])
 
-    sgd = SGD(lr=0.01, decay=1e-6, momentum=0.9, nesterov=True)
-
-    model.compile(loss='categorical_crossentropy',
-                  optimizer=sgd,
-                  metrics=["accuracy", sensitivity, specificity])
-
     return model
 
 
@@ -332,7 +327,7 @@ def top_model_shared_weights():
 
 def top_batch(indices, augment=True):
 
-    with h5py.File(workdir + 'deepqc.hdf5', 'r') as f:
+    with h5py.File(workdir + data_file, 'r') as f:
         images = f['MRI']
         labels = f['qc_label']    #already in one-hot
 
@@ -373,8 +368,7 @@ def plot_metrics(hist, results_dir):
     plt.savefig(results_dir + 'training-results.png')
     plt.close()
 
-if __name__ == "__main__":
-
+def setup_experiment(workdir):
     try:
         experiment_number = pickle.load(open(workdir + 'experiment_number.pkl', 'rb'))
         experiment_number += 1
@@ -389,30 +383,35 @@ if __name__ == "__main__":
 
     pickle.dump(experiment_number, open(workdir + 'experiment_number.pkl', 'wb'))
 
+    return results_dir, experiment_number
+
+if __name__ == "__main__":
+    results_dir, experiment_number = setup_experiment(workdir)
+
     abide_indices = pickle.load(open(workdir + 'abide_indices.pkl', 'rb'))
     ds030_indices = pickle.load(open(workdir + 'ds030_indices.pkl', 'rb'))
+    ibis_indices = pickle.load(open(workdir + 'ibis_indices.pkl', 'rb'))
+    ping_indices = pickle.load(open(workdir + 'ping_indices.pkl', 'rb'))
 
-    f = h5py.File(workdir + 'deepqc.hdf5', 'r')
+    f = h5py.File(workdir + data_file, 'r')
+    images = f['MRI']
 
-    # ping_indices = list(range(0, ping_end_index))
-    # abide_indices = list(range(ping_end_index, abide_end_index))
-    # ibis_indices = list(range(abide_end_index, ibis_end_index))
-    # ds030_indices = list(range(ibis_end_index, ds030_end_index))
+    print('number of samples in dataset:', images.shape[0])
 
     # print('ping:', ping_indices)
     # print('abide:', abide_indices)
     # print('ibis:', ibis_indices)
     # print('ds030', ds030_indices)
 
-    # train_indices = ping_indices + abide_indices + ibis_indices
-    train_indices = abide_indices
+    train_indices = ping_indices + abide_indices + ibis_indices
+    # train_indices = abide_indices
 
     # print('PING samples:', len(ping_indices))
     # print('ABIDE samples:', len(abide_indices))
     # print('IBIS samples:', len(ibis_indices))
     # print('training samples:', len(train_indices), len(ping_indices) + len(abide_indices) + len(ibis_indices))
 
-    train_labels = np.zeros((len(abide_indices), 2))
+    train_labels = np.zeros((len(train_indices), 2))
     print('labels shape:', train_labels.shape)
 
     good_subject_index = 0
@@ -432,9 +431,14 @@ if __name__ == "__main__":
     print('train:', train_indices)
     print('test:', test_indices)
 
-
     # define model
-    model = dilated_top()
+    model = top_model()
+
+    sgd = SGD(lr=0.01, decay=1e-6, momentum=0.9, nesterov=True)
+
+    model.compile(loss='categorical_crossentropy',
+                  optimizer=sgd,
+                  metrics=["accuracy", sensitivity, specificity])
 
     # print summary of model
     model.summary()
@@ -444,6 +448,8 @@ if __name__ == "__main__":
     model_checkpoint = ModelCheckpoint( results_dir + 'best_qc_model.hdf5',
                                         monitor="val_acc",
                                         save_best_only=True)
+
+    f.close()
 
     hist = model.fit_generator(
         top_batch(train_indices, augment=True),
