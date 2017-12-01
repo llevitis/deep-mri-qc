@@ -6,7 +6,7 @@ from keras.layers.merge import add, concatenate
 
 from dltk.core.io.augmentation import flip, elastic_transform
 
-from keras.optimizers import SGD
+from keras.optimizers import SGD, Adam
 from keras.initializers import Identity, Zeros, Orthogonal
 
 import numpy as np
@@ -25,6 +25,8 @@ import matplotlib.pyplot as plt
 from sklearn.model_selection import StratifiedKFold, StratifiedShuffleSplit
 
 from custom_loss import sensitivity, specificity
+
+from ndimage_aug import do_random_transform
 
 import tensorflow as tf
 
@@ -82,24 +84,35 @@ def dilated_top():
     xz = dilated_module(inputs[1])
     yz = dilated_module(inputs[2])
 
-    xy_flat = Flatten()(xy)
-    xz_flat = Flatten()(xz)
-    yz_flat = Flatten()(yz)
+    conv1 = Conv2D(32, (3, 3), activation='relu')(xy)
+    conv2 = Conv2D(32, (3, 3), activation='relu')(xz)
+    conv3 = Conv2D(32, (3, 3), activation='relu')(yz)
 
-    all_planes = concatenate([xy_flat, xz_flat, yz_flat])
+    pool1 = MaxPooling2D(pool_size=(2, 2))(conv1)
+    pool2 = MaxPooling2D(pool_size=(2, 2))(conv2)
+    pool3 = MaxPooling2D(pool_size=(2, 2))(conv3)
 
-    penultimate = Dense(192, activation='relu')(all_planes)
+    conv4 = Conv2D(32, (3, 3), activation='relu')(pool1)
+    conv5 = Conv2D(32, (3, 3), activation='relu')(pool2)
+    conv6 = Conv2D(32, (3, 3), activation='relu')(pool3)
+
+    pool4 = MaxPooling2D(pool_size=(2, 2))(conv4)
+    pool5 = MaxPooling2D(pool_size=(2, 2))(conv5)
+    pool6 = MaxPooling2D(pool_size=(2, 2))(conv6)
+
+    flat1 = Flatten()(pool4)
+    flat2 = Flatten()(pool5)
+    flat3 = Flatten()(pool6)
+
+    all = concatenate([flat1, flat2, flat3])
+
+    penultimate = Dense(64, activation='relu')(all)
     drop = Dropout(0.5)(penultimate)
     ultimate = Dense(64, activation='relu')(drop)
     drop = Dropout(0.5)(ultimate)
     output = Dense(nb_classes, activation='softmax')(drop)
 
-    sgd = SGD(lr=0.01, decay=1e-6, momentum=0.9, nesterov=True)
-
     model = Model(inputs=inputs, outputs=[output])
-    model.compile(loss='categorical_crossentropy',
-                  optimizer=sgd,
-                  metrics=["accuracy", sensitivity, specificity])
 
     return model
 
@@ -112,17 +125,17 @@ def top_model():
     inputs = [Input(shape=(192, 256, 192)), Input(shape=(192, 192, 192)), Input(shape=(192, 256, 192))]
 
     # XY plane
-    xy_conv1 = Conv2D(32, conv_size, activation='relu')(inputs[0])
+    xy_conv1 = Conv2D(64, conv_size, activation='relu')(inputs[0])
     xy_norm1 = BatchNormalization()(xy_conv1)
     xy_drop1 = Dropout(0.5)(xy_norm1)
     # xy_pool1 = MaxPooling2D(pool_size=pool_size)(xy_drop1)
 
-    xy_conv2 = Conv2D(32, conv_size, activation='relu')(xy_drop1)
+    xy_conv2 = Conv2D(64, conv_size, activation='relu')(xy_drop1)
     # xy_norm2 = BatchNormalization()(xy_conv2)
     xy_drop2 = Dropout(0.5)(xy_conv2)
     # xy_pool2 = MaxPooling2D(pool_size=pool_size)(xy_drop2)
 
-    xy_conv3 = Conv2D(32, conv_size, strides=[2, 2], activation='relu')(xy_drop2)
+    xy_conv3 = Conv2D(64, conv_size, strides=[2, 2], activation='relu')(xy_drop2)
     # xy_norm3 = BatchNormalization()(xy_conv3)
     xy_drop3 = Dropout(0.5)(xy_conv3)
     # xy_pool3 = MaxPooling2D(pool_size=pool_size)(xy_drop3)
@@ -145,12 +158,12 @@ def top_model():
     xz_drop1 = Dropout(0.5)(xz_norm1)
     # xz_pool1 = MaxPooling2D(pool_size=pool_size)(xz_drop1)
 
-    xz_conv2 = Conv2D(32, conv_size, activation='relu')(xz_drop1)
+    xz_conv2 = Conv2D(64, conv_size, activation='relu')(xz_drop1)
     # xz_norm2 = BatchNormalization()(xz_conv2)
     xz_drop2 = Dropout(0.5)(xz_conv2)
     # xz_pool2 = MaxPooling2D(pool_size=pool_size)(xz_drop2)
 
-    xz_conv3 = Conv2D(32, conv_size, strides=[2, 2], activation='relu')(xz_drop2)
+    xz_conv3 = Conv2D(64, conv_size, strides=[2, 2], activation='relu')(xz_drop2)
     # xz_norm3 = BatchNormalization()(xz_conv3)
     xz_drop3 = Dropout(0.5)(xz_conv3)
     # xz_pool3 = MaxPooling2D(pool_size=pool_size)(xz_drop3)
@@ -168,17 +181,17 @@ def top_model():
     xz_flat = Flatten()(xz_fully)
 
     # YZ plane
-    yz_conv1 = Conv2D(32, conv_size, activation='relu')(inputs[2])
+    yz_conv1 = Conv2D(64, conv_size, activation='relu')(inputs[2])
     yz_norm1 = BatchNormalization()(yz_conv1)
     yz_drop1 = Dropout(0.5)(yz_norm1)
     # yz_pool1 = MaxPooling2D(pool_size=pool_size)(yz_drop1)
 
-    yz_conv2 = Conv2D(32, conv_size, activation='relu')(yz_drop1)
+    yz_conv2 = Conv2D(64, conv_size, activation='relu')(yz_drop1)
     # yz_norm2 = BatchNormalization()(yz_conv2)
     yz_drop2 = Dropout(0.5)(yz_conv2)
     # yz_pool2 = MaxPooling2D(pool_size=pool_size)(yz_drop2)
 
-    yz_conv3 = Conv2D(32, conv_size, strides=[2, 2], activation='relu')(yz_drop2)
+    yz_conv3 = Conv2D(64, conv_size, strides=[2, 2], activation='relu')(yz_drop2)
     # yz_norm3 = BatchNormalization()(yz_conv3)
     yz_drop3 = Dropout(0.5)(yz_conv3)
     # yz_pool3 = MaxPooling2D(pool_size=pool_size)(yz_drop3)
@@ -341,7 +354,11 @@ def top_batch(indices, augment=True):
                     if augment:
                         t1_image = flip(t1_image, 2)
                         # t1_image = elastic_transform(t1_image, [3,3,3], [3,3,3])
-
+                        ### This will apply a random rotation
+                        ### Input t1 image must be 3D.
+                        ### Output matrix is a 3D matrix.
+                        ### (Args: Rotations are in degrees not radians. )
+                        t1_image = do_random_transform(t1_image, 20, 20, 20)
                     xy = t1_image[np.newaxis, ...]
                     xz = np.swapaxes(t1_image[:, 32:-32, :], 1, 2)[np.newaxis, ...]
                     yz = np.swapaxes(t1_image, 0, 2)[np.newaxis, ...]
@@ -432,9 +449,10 @@ if __name__ == "__main__":
     print('test:', test_indices)
 
     # define model
-    model = top_model()
+    model = dilated_top()
 
     sgd = SGD(lr=0.01, decay=1e-6, momentum=0.9, nesterov=True)
+    adam = Adam(lr=0.001, beta_1=0.9, beta_2=0.999, epsilon=1e-08, decay=1e-6)
 
     model.compile(loss='categorical_crossentropy',
                   optimizer=sgd,
