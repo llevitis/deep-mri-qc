@@ -24,7 +24,7 @@ import matplotlib.pyplot as plt
 
 from sklearn.model_selection import StratifiedKFold, StratifiedShuffleSplit
 
-from custom_loss import sensitivity, specificity
+# from custom_loss import sensitivity, specificity
 
 from ndimage_aug import do_random_transform
 
@@ -125,93 +125,112 @@ def top_model():
     inputs = [Input(shape=(192, 256, 192)), Input(shape=(192, 192, 192)), Input(shape=(192, 256, 192))]
 
     # XY plane
-    xy_conv1 = Conv2D(64, conv_size, activation='relu')(inputs[0])
+    xy_conv1 = Conv2D(32, conv_size, activation='relu')(inputs[0])
     xy_norm1 = BatchNormalization()(xy_conv1)
-    xy_drop1 = Dropout(0.5)(xy_norm1)
-    # xy_pool1 = MaxPooling2D(pool_size=pool_size)(xy_drop1)
+    # xy_drop1 = Dropout(0.5)(xy_norm1)
+    xy_pool1 = MaxPooling2D(pool_size=pool_size)(xy_norm1)
 
-    xy_conv2 = Conv2D(64, conv_size, activation='relu')(xy_drop1)
-    # xy_norm2 = BatchNormalization()(xy_conv2)
-    xy_drop2 = Dropout(0.5)(xy_conv2)
-    # xy_pool2 = MaxPooling2D(pool_size=pool_size)(xy_drop2)
+    xy_conv2 = Conv2D(32, conv_size, activation='relu')(xy_pool1)
+    xy_norm2 = BatchNormalization()(xy_conv2)
+    # xy_drop2 = Dropout(0.5)(xy_conv2)
+    xy_pool2 = MaxPooling2D(pool_size=pool_size)(xy_norm2)
 
-    xy_conv3 = Conv2D(64, conv_size, strides=[2, 2], activation='relu')(xy_drop2)
-    # xy_norm3 = BatchNormalization()(xy_conv3)
-    xy_drop3 = Dropout(0.5)(xy_conv3)
-    # xy_pool3 = MaxPooling2D(pool_size=pool_size)(xy_drop3)
+    xy_conv3 = Conv2D(32, conv_size, activation='relu')(xy_pool2)
+    xy_norm3 = BatchNormalization()(xy_conv3)
+    # xy_drop3 = Dropout(0.5)(xy_conv3)
+    xy_pool3 = MaxPooling2D(pool_size=pool_size)(xy_norm3)
 
-    xy_conv4 = Conv2D(64, conv_size, strides=[2, 2], activation='relu')(xy_drop3)
-    # xy_norm4 = BatchNormalization()(xy_conv4)
-    xy_drop4 = Dropout(0.5)(xy_conv4)
-    # xy_pool4 = MaxPooling2D(pool_size=pool_size)(xy_drop4)
+    xy_conv4 = Conv2D(64, conv_size, activation='relu')(xy_pool3)
+    xy_norm4 = BatchNormalization()(xy_conv4)
+    # xy_drop4 = Dropout(0.5)(xy_conv4)
+    xy_pool4 = MaxPooling2D(pool_size=pool_size)(xy_norm4)
 
-    # xy_conv5 = Conv2D(32, conv_size, strides=[2, 2], activation='relu')(xy_drop4)
-    # xy_conv6 = Conv2D(32, conv_size, activation='relu')(xy_conv5)
-    # xy_conv7 = Conv2D(32, conv_size, activation='relu')(xy_conv6)
+    xy_conv5 = Conv2D(64, conv_size, activation='relu')(xy_pool4)
+    xy_norm5 = BatchNormalization()(xy_conv5)
+    # xy_drop4 = Dropout(0.5)(xy_conv4)
+    xy_pool5 = MaxPooling2D(pool_size=pool_size)(xy_norm5)
 
-    xy_fully = Conv2D(32, (1, 1), activation='relu')(xy_drop4)
+    xy_conv6 = Conv2D(128, conv_size, activation='relu')(xy_pool5)
+    xy_norm6 = BatchNormalization()(xy_conv6)
+    # xy_drop4 = Dropout(0.5)(xy_conv4)
+    xy_pool6 = MaxPooling2D(pool_size=pool_size)(xy_norm6)
+
+    xy_fully = Conv2D(512, (1, 1), activation='relu')(xy_pool6)
     xy_flat  = Flatten()(xy_fully)
 
     # XZ plane
     xz_conv1 = Conv2D(32, conv_size, activation='relu')(inputs[1])
     xz_norm1 = BatchNormalization()(xz_conv1)
-    xz_drop1 = Dropout(0.5)(xz_norm1)
-    # xz_pool1 = MaxPooling2D(pool_size=pool_size)(xz_drop1)
+    # xz_drop1 = Dropout(0.5)(xz_norm1)
+    xz_pool1 = MaxPooling2D(pool_size=pool_size)(xz_norm1)
 
-    xz_conv2 = Conv2D(64, conv_size, activation='relu')(xz_drop1)
-    # xz_norm2 = BatchNormalization()(xz_conv2)
-    xz_drop2 = Dropout(0.5)(xz_conv2)
-    # xz_pool2 = MaxPooling2D(pool_size=pool_size)(xz_drop2)
+    xz_conv2 = Conv2D(32, conv_size, activation='relu')(xz_pool1)
+    xz_norm2 = BatchNormalization()(xz_conv2)
+    # xz_drop2 = Dropout(0.5)(xz_conv2)
+    xz_pool2 = MaxPooling2D(pool_size=pool_size)(xz_norm2)
 
-    xz_conv3 = Conv2D(64, conv_size, strides=[2, 2], activation='relu')(xz_drop2)
-    # xz_norm3 = BatchNormalization()(xz_conv3)
-    xz_drop3 = Dropout(0.5)(xz_conv3)
-    # xz_pool3 = MaxPooling2D(pool_size=pool_size)(xz_drop3)
+    xz_conv3 = Conv2D(32, conv_size, activation='relu')(xz_pool2)
+    xz_norm3 = BatchNormalization()(xz_conv3)
+    # xz_drop3 = Dropout(0.5)(xz_conv3)
+    xz_pool3 = MaxPooling2D(pool_size=pool_size)(xz_norm3)
 
-    xz_conv4 = Conv2D(64, conv_size, strides=[2, 2], activation='relu')(xz_drop3)
-    # xz_norm4 = BatchNormalization()(xz_conv4)
-    xz_drop4 = Dropout(0.5)(xz_conv4)
-    # xz_pool4 = MaxPooling2D(pool_size=pool_size)(xz_drop4)
+    xz_conv4 = Conv2D(64, conv_size, activation='relu')(xz_pool3)
+    xz_norm4 = BatchNormalization()(xz_conv4)
+    # xz_drop4 = Dropout(0.5)(xz_conv4)
+    xz_pool4 = MaxPooling2D(pool_size=pool_size)(xz_norm4)
 
-    # xz_conv5 = Conv2D(32, conv_size, strides=[2, 2], activation='relu')(xz_drop4)
-    # xz_conv6 = Conv2D(32, conv_size, activation='relu')(xz_conv5)
-    # xz_conv7 = Conv2D(32, conv_size, activation='relu')(xz_conv6)
+    xz_conv5 = Conv2D(64, conv_size, activation='relu')(xz_pool4)
+    xz_norm5 = BatchNormalization()(xz_conv5)
+    # xz_drop4 = Dropout(0.5)(xz_conv4)
+    xz_pool5 = MaxPooling2D(pool_size=pool_size)(xz_norm5)
 
-    xz_fully = Conv2D(32, (1, 1), activation='relu')(xz_drop4)
+    xz_conv6 = Conv2D(128, conv_size, activation='relu')(xz_pool5)
+    xz_norm6 = BatchNormalization()(xz_conv6)
+    # xz_drop4 = Dropout(0.5)(xz_conv4)
+    xz_pool6 = MaxPooling2D(pool_size=pool_size)(xz_norm6)
+
+
+    xz_fully = Conv2D(512, (1, 1), activation='relu')(xz_pool6)
     xz_flat = Flatten()(xz_fully)
 
-    # YZ plane
-    yz_conv1 = Conv2D(64, conv_size, activation='relu')(inputs[2])
+    # YZ planef
+    yz_conv1 = Conv2D(32, conv_size, activation='relu')(inputs[2])
     yz_norm1 = BatchNormalization()(yz_conv1)
-    yz_drop1 = Dropout(0.5)(yz_norm1)
-    # yz_pool1 = MaxPooling2D(pool_size=pool_size)(yz_drop1)
+    # yz_drop1 = Dropout(0.5)(yz_norm1)
+    yz_pool1 = MaxPooling2D(pool_size=pool_size)(yz_norm1)
 
-    yz_conv2 = Conv2D(64, conv_size, activation='relu')(yz_drop1)
-    # yz_norm2 = BatchNormalization()(yz_conv2)
-    yz_drop2 = Dropout(0.5)(yz_conv2)
-    # yz_pool2 = MaxPooling2D(pool_size=pool_size)(yz_drop2)
+    yz_conv2 = Conv2D(32, conv_size, activation='relu')(yz_pool1)
+    yz_norm2 = BatchNormalization()(yz_conv2)
+    # yz_drop2 = Dropout(0.5)(yz_conv2)
+    yz_pool2 = MaxPooling2D(pool_size=pool_size)(yz_norm2)
 
-    yz_conv3 = Conv2D(64, conv_size, strides=[2, 2], activation='relu')(yz_drop2)
-    # yz_norm3 = BatchNormalization()(yz_conv3)
-    yz_drop3 = Dropout(0.5)(yz_conv3)
-    # yz_pool3 = MaxPooling2D(pool_size=pool_size)(yz_drop3)
+    yz_conv3 = Conv2D(32, conv_size, activation='relu')(yz_pool2)
+    yz_norm3 = BatchNormalization()(yz_conv3)
+    # yz_drop3 = Dropout(0.5)(yz_conv3)
+    yz_pool3 = MaxPooling2D(pool_size=pool_size)(yz_norm3)
 
-    yz_conv4 = Conv2D(64, conv_size, strides=[2, 2], activation='relu')(yz_drop3)
-    # yz_norm4 = BatchNormalization()(yz_conv4)
-    yz_drop4 = Dropout(0.5)(yz_conv4)
-    # yz_pool4 = MaxPooling2D(pool_size=pool_size)(yz_drop4)
+    yz_conv4 = Conv2D(64, conv_size, activation='relu')(yz_pool3)
+    yz_norm4 = BatchNormalization()(yz_conv4)
+    # yz_drop4 = Dropout(0.5)(yz_conv4)
+    yz_pool4 = MaxPooling2D(pool_size=pool_size)(yz_norm4)
 
-    # yz_conv5 = Conv2D(32, conv_size, strides=[2, 2], activation='relu')(yz_drop4)
-    # yz_conv6 = Conv2D(32, conv_size, activation='relu')(yz_conv5)
-    # yz_conv7 = Conv2D(32, conv_size, activation='relu')(yz_conv6)
+    yz_conv5 = Conv2D(64, conv_size, activation='relu')(yz_pool4)
+    yz_norm5 = BatchNormalization()(yz_conv5)
+    # yz_drop4 = Dropout(0.5)(yz_conv5)
+    yz_pool5 = MaxPooling2D(pool_size=pool_size)(yz_norm5)
 
-    yz_fully = Conv2D(32, (1, 1), activation='relu')(yz_drop4)
+    yz_conv6 = Conv2D(128, conv_size, activation='relu')(yz_pool5)
+    yz_norm6 = BatchNormalization()(yz_conv6)
+    # yz_drop4 = Dropout(0.5)(yz_conv4)
+    yz_pool6 = MaxPooling2D(pool_size=pool_size)(yz_norm6)
+
+    yz_fully = Conv2D(512, (1, 1), activation='relu')(yz_pool6)
     yz_flat = Flatten()(yz_fully)
 
     allplanes = concatenate([xy_flat, xz_flat, yz_flat])
     all_drop = Dropout(0.5)(allplanes)
 
-    last_layer = Dense(128, activation='relu')(all_drop)
+    last_layer = Dense(512, activation='relu')(all_drop)
     last_drop = Dropout(0.5)(last_layer)
 
     output = Dense(nb_classes, activation='softmax')(last_drop)
@@ -334,7 +353,7 @@ def top_model_shared_weights():
 
     model.compile(loss='categorical_crossentropy',
                   optimizer='adam',
-                  metrics=["accuracy", sensitivity, specificity])
+                  metrics=["accuracy"])
 
     return model
 
@@ -358,7 +377,7 @@ def top_batch(indices, augment=True):
                         ### Input t1 image must be 3D.
                         ### Output matrix is a 3D matrix.
                         ### (Args: Rotations are in degrees not radians. )
-                        t1_image = do_random_transform(t1_image, 20, 20, 20)
+                        # t1_image = do_random_transform(t1_image, 20, 20, 20)
                     xy = t1_image[np.newaxis, ...]
                     xz = np.swapaxes(t1_image[:, 32:-32, :], 1, 2)[np.newaxis, ...]
                     yz = np.swapaxes(t1_image, 0, 2)[np.newaxis, ...]
@@ -401,6 +420,56 @@ def setup_experiment(workdir):
     pickle.dump(experiment_number, open(workdir + 'experiment_number.pkl', 'wb'))
 
     return results_dir, experiment_number
+
+
+def sens_spec(indices, model):
+    with h5py.File(workdir + data_file) as f:
+        images = f['MRI']
+        labels = f['qc_label']
+
+        predictions = np.zeros((len(indices)))
+        actual = np.zeros((len(indices)))
+
+        for i, index in enumerate(indices):
+
+            prediction = model.predict_generator(top_batch([index], augment=False), steps=1)[0][1]
+
+            if prediction >= 0.5:
+                predictions[i] = 1
+            else:
+                predictions[i] = 0
+            actual[i] = np.argmax(labels[index, ...])
+
+        tp, tn, fp, fn = 0, 0, 0, 0
+
+        for k, (true_label, predicted_label) in enumerate(zip(actual, predictions)):
+            print('true:', true_label, 'predicted:', predicted_label)
+            if true_label == 1:
+                if predicted_label == 1:
+                    tp += 1
+                else:
+                    fn += 1
+            else:
+                if predicted_label == 0:
+                    tn += 1
+                else:
+                    fp += 1
+
+        print('tp, fn, tn, fp')
+        print(tp, fn, tn, fp)
+
+        # conf = confusion_matrix(actual, predictions)
+        #
+        # tp = conf[0][0]
+        # tn = conf[1][1]
+        # fp = conf[0][1]
+        # fn = conf[1][0]
+
+        sensitivity = float(tp) / (float(tp) + float(fn) + 1e-10)
+        specificity = float(tn) / (float(tn) + float(fp) + 1e-10)
+
+    return sensitivity, specificity
+
 
 if __name__ == "__main__":
     results_dir, experiment_number = setup_experiment(workdir)
@@ -449,19 +518,19 @@ if __name__ == "__main__":
     print('test:', test_indices)
 
     # define model
-    model = dilated_top()
+    model = top_model()
 
     sgd = SGD(lr=0.01, decay=1e-6, momentum=0.9, nesterov=True)
     adam = Adam(lr=0.001, beta_1=0.9, beta_2=0.999, epsilon=1e-08, decay=1e-6)
 
     model.compile(loss='categorical_crossentropy',
-                  optimizer=sgd,
-                  metrics=["accuracy", sensitivity, specificity])
+                  optimizer=adam,
+                  metrics=["accuracy"])
 
     # print summary of model
     model.summary()
 
-    num_epochs = 100
+    num_epochs = 10
 
     model_checkpoint = ModelCheckpoint( results_dir + 'best_qc_model.hdf5',
                                         monitor="val_acc",
@@ -475,7 +544,8 @@ if __name__ == "__main__":
         epochs=num_epochs,
         callbacks=[model_checkpoint],
         validation_data=top_batch(validation_indices, augment=False),
-        validation_steps=len(validation_indices)
+        validation_steps=len(validation_indices),
+        class_weight={0:100, 1:1}
     )
 
     model.load_weights(results_dir + 'best_qc_model.hdf5')
@@ -509,6 +579,15 @@ if __name__ == "__main__":
     # results['spec'] = spec
     #
     # pickle.dump(results, open(results_dir + 'test_results.pkl', 'wb'))
+
+    train_sens, train_spec = sens_spec(train_indices, model)
+    val_sens, val_spec = sens_spec(validation_indices, model)
+    test_sens, test_spec = sens_spec(test_indices, model)
+
+    print('sensitivity, specificity')
+    print('training:', train_sens, train_spec)
+    print('validation:', val_sens, val_spec)
+    print('testing:', test_sens, test_spec)
 
     plot_metrics(hist, results_dir)
 

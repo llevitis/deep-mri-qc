@@ -1,7 +1,8 @@
 from keras.models import Sequential
 from keras.layers import Dense, Conv2D, MaxPooling2D, Flatten, BatchNormalization, Dropout
 from keras.optimizers import SGD, Adam
-from keras.callbacks import ModelCheckpoint, Callback
+from keras.callbacks import ModelCheckpoint, Callback, LearningRateScheduler
+import keras.backend as K
 
 import numpy as np
 import h5py
@@ -141,29 +142,55 @@ def sens_spec(indices, model):
         predictions = np.zeros((len(indices)))
         actual = np.zeros((len(indices)))
 
-        predict_batch = np.zeros((1, target_size[1], target_size[2], 1))
-
         for i, index in enumerate(indices):
-            predict_batch[0, :, :, 0] = images[index, target_size[0] // 2, :, :]
 
-            prediction = model.predict_on_batch(predict_batch)[0][0]
+            slice_predictions = []
+            for j in range(10):
+                slice_predictions.append(model.predict(images[index, (target_size[0] // 2) - 4 + j, :, :][np.newaxis, ..., np.newaxis])[0][1])
+
+            print(slice_predictions)
+            prediction = np.mean(slice_predictions)
             if prediction >= 0.5:
                 predictions[i] = 1
             else:
                 predictions[i] = 0
             actual[i] = np.argmax(labels[index, ...])
 
-        conf = confusion_matrix(actual, predictions)
+        tp, tn, fp, fn = 0, 0, 0, 0
 
-        tp = conf[0][0]
-        tn = conf[1][1]
-        fp = conf[0][1]
-        fn = conf[1][0]
+        for k, (true_label, predicted_label) in enumerate(zip(actual, predictions)):
+            print('true:', true_label, 'predicted:', predicted_label)
+            if true_label == 1:
+                if predicted_label == 1:
+                    tp += 1
+                else:
+                    fn += 1
+            else:
+                if predicted_label == 0:
+                    tn += 1
+                else:
+                    fp += 1
+
+        print('tp, fn, tn, fp')
+        print(tp, fn, tn, fp)
 
         sensitivity = float(tp) / (float(tp) + float(fn) + 1e-10)
         specificity = float(tn) / (float(tn) + float(fp) + 1e-10)
 
     return sensitivity, specificity
+
+def lr_scheduler(model):
+    # reduce learning rate by factor of 10 every 100 epochs
+    def schedule(epoch):
+        new_lr = K.get_value(model.optimizer.lr)
+
+        if epoch % 100 == 0:
+            new_lr = new_lr / 2
+
+        return new_lr
+
+    scheduler = LearningRateScheduler(schedule)
+    return scheduler
 
 def qc_model():
     nb_classes = 2
@@ -247,7 +274,7 @@ def batch(indices, n, random_slice=False):
 def plot_graphs(hist, results_dir, fold_num):
     epoch_num = range(len(hist.history['acc']))
 
-    plt.clf()
+    plt.close()
     plt.plot(epoch_num, hist.history['acc'], label='Training Accuracy')
     plt.plot(epoch_num, hist.history['val_acc'], label="Validation Accuracy")
     # plt.plot(epoch_num, hist.history['sensitivity'], label='Train Sens')
@@ -255,9 +282,10 @@ def plot_graphs(hist, results_dir, fold_num):
     # plt.plot(epoch_num, hist.history['specificity'], label='Train Spec')
     # plt.plot(epoch_num, hist.history['val_specificity'], label='Val Spec')
 
-    plt.legend(shadow=True)
-    plt.xlabel("Training Epoch Number")
-    plt.ylabel("Metric Value")
+    plt.legend(shadow=True, fontsize=20)
+    plt.xlabel("Training Epoch Number", fontsize=24)
+    plt.ylabel("Metric Value", fontsize=24)
+
     plt.savefig(results_dir + 'training_metrics_fold' + str(fold_num) + '.png', bbox_inches='tight')
     plt.close()
 
@@ -297,7 +325,7 @@ def predict_and_visualize(model, indices, results_dir):
             model = utils.apply_modifications(model)
 
         for i, (index, prediction) in enumerate(zip(indices, predictions)):
-            fig, ax = plt.subplots(1, 2, figsize=(12, 8))
+            fig, ax = plt.subplots(1, 2, figsize=(12, 9))
 
             actual = np.argmax(labels[index, ...])
             print('actual, predicted PASS/FAIL:', actual, prediction)
@@ -334,7 +362,9 @@ def predict_and_visualize(model, indices, results_dir):
                 img_ax = ax[j+1].imshow(overlay(heatmap, gray3, alpha=0.2))
                 ax[j+1].set_xticks([])
                 ax[j+1].set_yticks([])
-                plt.colorbar(img_ax)
+                cbar = plt.colorbar(img_ax, ticks=[0, 255])
+                cbar.ax.set_yticklabels(['No influence', 'High influence'])
+                
                 ax[j+1].set_xlabel('Decision Regions (Guided Grad-CAM)')
 
                 if prediction == 0:
@@ -460,15 +490,16 @@ if __name__ == "__main__":
 
         # verify_hdf5(reversed(train_indices), results_dir)
 
-        f = h5py.File(workdir + 'ibis.hdf5', 'r')
-        h5labels = f['qc_label']
-        for index in train_indices:
-            print(index, labels[index], h5labels[index, ...])
-        f.close()
+        # f = h5py.File(workdir + 'ibis.hdf5', 'r')
+        # h5labels = f['qc_label']
+        # for index in train_indices:
+        #     print(index, labels[index], h5labels[index, ...])
+        # f.close()
 
+        lr_sched = lr_scheduler(model)
         model_checkpoint = ModelCheckpoint(results_dir + "best_weights" + "_fold_" + str(k) + ".hdf5", monitor="val_acc", verbose=0, save_best_only=True, save_weights_only=False, mode='max')
 
-        hist = model.fit_generator(batch(train_indices, batch_size, True), np.ceil(len(train_indices)/batch_size), epochs=400, validation_data=batch(validation_indices, batch_size), validation_steps=np.ceil(len(validation_indices)//batch_size), callbacks=[model_checkpoint], class_weight = {0:10, 1:1})
+        hist = model.fit_generator(batch(train_indices, batch_size, True), np.ceil(len(train_indices)/batch_size), epochs=400, validation_data=batch(validation_indices, batch_size), validation_steps=np.ceil(len(validation_indices)//batch_size), callbacks=[model_checkpoint], class_weight = {0:20, 1:1})
 
         model.load_weights(results_dir + "best_weights" + "_fold_" + str(k) + ".hdf5")
         model.save(results_dir + 'ibis_qc_model' + str(k) + '.hdf5')
@@ -494,25 +525,27 @@ if __name__ == "__main__":
         scores['train_spec'].append(train_spec)
         scores['val_sens'].append(val_sens)
         scores['val_spec'].append(val_spec)
+        scores['test_sens'].append(test_sens)
+        scores['test_spec'].append(test_spec)
 
         predict_and_visualize(model, test_indices, results_dir)
 
-        # model.compile(loss='categorical_crossentropy', optimizer='adam', metrics=['acc'])
-        # model.save(results_dir + 'ibis_qc_model' + str(k) + '.hdf5')
+        model.compile(loss='categorical_crossentropy', optimizer='adam', metrics=score_metrics)
+        model.save(results_dir + 'ibis_qc_model' + str(k) + '.hdf5')
 
     plt.close()
 
     score_data = []
     score_labels = []
 
-    score_data.append(scores['train_acc'])
-    score_labels.append('Training\nAccuracy')
-
-    score_data.append(scores['val_acc'])
-    score_labels.append('Validation\nAccuracy')
-
-    score_data.append(scores['test_acc'])
-    score_labels.append('Test\nAccuracy')
+    # score_data.append(scores['train_acc'])
+    # score_labels.append('Training\nAccuracy')
+    #
+    # score_data.append(scores['val_acc'])
+    # score_labels.append('Validation\nAccuracy')
+    #
+    # score_data.append(scores['test_acc'])
+    # score_labels.append('Test\nAccuracy')
 
     score_data.append(scores['train_sens'])
     score_labels.append('Training\nSensitivity')
@@ -532,8 +565,13 @@ if __name__ == "__main__":
     score_data.append(scores['test_spec'])
     score_labels.append('Test\nSpecificity')
 
-    bplot = plt.boxplot(score_data, patch_artist=True)
-    plt.xticks(np.arange(len(score_data)), score_labels)
+    plt.figure(figsize=(12, 9))
+
+    bplot = plt.boxplot(score_data, patch_artist=True, zorder=3)
+
+    plt.xticks(np.arange(1, len(score_data)+1), score_labels, rotation=30, horizontalalignment='right', fontsize=20)
+    plt.xlim(0, len(score_data) + 1)
+    plt.grid(zorder=0)
 
     # fill with colors
     colors = ['pink', 'red', 'darkred', 'pink', 'red', 'darkred', 'pink', 'red', 'darkred']
@@ -541,8 +579,9 @@ if __name__ == "__main__":
     for patch, color in zip(bplot['boxes'], colors):
         patch.set_facecolor(color)
 
-    plt.xlabel('Metric')
-    plt.ylabel('Value')
+    plt.xlabel('Metric', fontsize=24)
+    plt.ylabel('Value', fontsize=24)
+    plt.tight_layout()
 
     results_dir = workdir + '/experiment-' + str(experiment_number) + '/'
     plt.savefig(results_dir + 'metrics_boxplot.png')
